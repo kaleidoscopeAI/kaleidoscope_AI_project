@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional, Union, Tuple
 
 # Adjust logging import assuming logging_config.py is in utils/
 try:
-    from utils.logging_config import configure_logging, get_logger
+    from kaleidoscope_ai.utils.logging_config import configure_logging, get_logger
 except ImportError:
     # Fallback if run directly from root perhaps?
     print("Warning: Could not import logging_config from utils. Using basic logging.")

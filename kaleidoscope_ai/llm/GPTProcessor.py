@@ -1,3 +1,5 @@
+from typing import Tuple
+import numpy as np
 # modules/GPTProcessor.py
 import logging
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline

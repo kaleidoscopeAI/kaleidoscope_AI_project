@@ -17,10 +17,10 @@ from pathlib import Path
 if __name__ == "__main__":
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
     sys.path.insert(0, project_root)
-    from src.utils.logging_config import configure_logging, get_logger
+    from kaleidoscope_ai.utils.logging_config import configure_logging, get_logger
     configure_logging()
 else:
-    from src.utils.logging_config import get_logger
+    from kaleidoscope_ai.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 

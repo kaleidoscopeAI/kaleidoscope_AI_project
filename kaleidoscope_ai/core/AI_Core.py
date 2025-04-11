@@ -4,14 +4,12 @@ import time
 import random
 import numpy as np
 from .NodeManager import NodeManager # Use absolute import from core
-from .GrowthLaws import GrowthLaws # Use absolute import from core
-from modules.PerspectiveManager import PerspectiveManager # Use absolute import from modules
-from modules.SeedManager import SeedManager # Use absolute import from modules
-from modules.MirroredNetwork import MirroredNetwork # Use absolute import from modules
-from modules.MemoryGraph import MemoryGraph # Use absolute import from modules
-from modules.PatternRecognition import PatternRecognition # Use absolute import from modules
-from modules.GPTProcessor import GPTProcessor # Import the new GPT processor
-from nodes.TextNode import TextNode # Import updated TextNode
+from .laws import GrowthLaws # Use absolute import from core
+from .PerspectiveManager import PerspectiveManager # Use absolute import from modules
+from .SeedManager import SeedManager # Use absolute import from modules
+from kaleidoscope_ai.modules import PatternRecognition # Use absolute import from modules
+from kaleidoscope_ai.llm import GPTProcessor # Import the new GPT processor
+from kaleidoscope_ai.nodes import TextNode # Import updated TextNode
 # Import VisualNode and potentially other node types if they exist
 # from nodes.VisualNode import VisualNode
 
@@ -68,7 +66,7 @@ class AI_Core:
             else:
                 # Fallback or generic node type placeholder
                 # You might need a GenericNode class or use BaseNode if applicable
-                from .BaseNode import BaseNode # Import BaseNode if needed for generic nodes
+                from kaleidoscope_ai.nodes import BaseNode # Import BaseNode if needed for generic nodes
                 node = BaseNode(node_type="generic", core_laws=core_laws, node_id=node_id)
                 # Assign placeholder capabilities or state if BaseNode is used directly
                 node.state = node.CoreState() if not hasattr(node, 'state') else node.state # Ensure state exists

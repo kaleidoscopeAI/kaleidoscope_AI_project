@@ -3,7 +3,7 @@ import logging
 import heapq
 from typing import Dict, Any, Optional, List
 
-from .BaseNode import BaseNode
+from kaleidoscope_ai.nodes import BaseNode
 
 logger = logging.getLogger(__name__)
 

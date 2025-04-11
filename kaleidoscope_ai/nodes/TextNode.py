@@ -1,3 +1,4 @@
+from collections import deque
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -7,9 +8,9 @@ TextNode.py - Production-ready text processing node.
 import logging
 import time
 from typing import List, Dict, Any, Optional, Callable, Tuple
-from core import CoreLaws  # Assuming CoreLaws is in the 'core' package
-from CapabilityNode import CapabilityNode  # Adjust import if needed
-from modules.GPTProcessor import GPTProcessor  # Adjust import path
+from kaleidoscope_ai.core.laws import GrowthLaws  # Assuming CoreLaws is in the 'core' package
+from .CapabilityNode import CapabilityNode  # Adjust import if needed
+from kaleidoscope_ai.llm import GPTProcessor  # Adjust import path
 
 # --- Enhanced Imports (for production) ---
 from concurrent.futures import ThreadPoolExecutor, as_completed

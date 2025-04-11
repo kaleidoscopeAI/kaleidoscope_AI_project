@@ -1,0 +1,54 @@
+// .devcontainer/devcontainer.json
+{
+    "name": "Kaleidoscope AI Project",
+    // Use a standard Python 3 image. You can specify a version like 3.11, 3.10, etc.
+    "image": "mcr.microsoft.com/devcontainers/python:3.11",
+
+    // Features to add to the dev container. More info: https://containers.dev/features.
+    "features": {
+        // Installs Python tooling, Jupyter, etc.
+        "ghcr.io/devcontainers/features/python:1": {
+            "version": "latest"
+        }
+        // Add other features if needed, e.g., "ghcr.io/devcontainers/features/node:1": {} for Node.js
+    },
+
+    // Ports to forward automatically. Adjust if your bridge runs on a different port.
+    "forwardPorts": [8000],
+
+    // Use 'postCreateCommand' to run commands after the container is created, but before VS Code connects.
+    // This is a good place to install dependencies.
+    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y curl && pip install --upgrade pip && pip install -r requirements.txt && echo 'Downloading Ollama...' && curl -fsSL https://ollama.com/install.sh | sh",
+
+    // Use 'postAttachCommand' to run commands after VS Code attaches.
+    "postAttachCommand": {
+       "server": "echo 'Codespace attached. Remember to start Ollama if needed (e.g., run \"ollama serve\" in a separate terminal)'"
+    },
+
+
+    // Configure tool-specific properties.
+    "customizations": {
+        // Configure properties specific to VS Code.
+        "vscode": {
+            // Add the IDs of extensions you want installed when the container is created.
+            "extensions": [
+                "ms-python.python",             // Python language support
+                "ms-python.vscode-pylance",     // Python intellisense
+                "ms-python.flake8",             // Python linter
+                "ms-toolsai.jupyter",           // Jupyter Notebook support
+                "njpwerner.autodocstring",      // Python docstring generator
+                "github.codespaces-features"    // Codespaces helper
+            ],
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.linting.flake8Enabled": true,
+                "python.linting.pylintEnabled": false, // Disable pylint if using flake8
+                "python.formatting.provider": "black",
+                "editor.formatOnSave": true
+            }
+        }
+    }
+
+    // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+    // "remoteUser": "root"
+}
