@@ -60,19 +60,22 @@ ENV/
 env.bak/
 venv.bak/
 
-# --- Project Specific ---
-# Log files
+# --- Project Specific (kaleidoscope_ai) ---
+# Log files (ignore contents, keep directory with .gitkeep if needed)
 logs/*
 !logs/.gitkeep
 
-# Archive files (specifically the ones created by our scripts)
+# Archive directory (ignore specific archived file patterns)
 archive/*.archived
 archive/*.old
-# Keep the archive directory itself, ignore specific patterns if needed elsewhere
+# Keep the archive directory itself
 # !archive/.gitkeep
 
-# Cache directories (if any other tools create them)
-.cache/
+# Compiled Python files potentially missed
+kaleidoscope_ai/core/*.cpython-*.py
+
+# Nano directory (if accidentally created)
+kaleidoscope_ai/nano/
 
 # --- OS / Editor Specific ---
 # MacOS
@@ -119,7 +122,9 @@ secrets.json
 # Jupyter Notebook Checkpoints
 .ipynb_checkpoints
 
-# Large data files (add specific patterns if needed)
+# Large data files (uncomment and add specific patterns if needed)
 # *.csv
 # *.pkl
 # *.hdf5
+# *.bin
+# *.model
