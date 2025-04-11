@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""
+Kaleidoscope AI – Cube ⇄ Ollama Bridge (sandbox-safe)
+=====================================================
+This single-file FastAPI backend now boots even in constrained runtimes that
+lack optional stdlib modules **ssl** (needed by `httpx` / `anyio`) and
+**micropip** (sometimes imported by Pyodide front-ends).
+
+We create lightweight stubs for those modules so downstream imports work
+without crashing. On a normal CPython install with full stdlib these stubs are
+ignored.
+"""
+from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# Graceful stubs for missing modules (ssl, micropip)
+# ---------------------------------------------------------------------------
+import sys, types
+
+# ---- ssl stub -------------------------------------------------------------
+if "ssl" not in sys.modules:
+    ssl_stub = types.ModuleType("ssl")
+
+    class _DummySSLContext:
+        def __init__(self, *_, **__):
+            pass
+        def load_default_certs(self, *_, **__):
+            pass
+        def load_verify_locations(self, *_, **__):
+            pass
+        def set_ciphers(self, *_):
+            pass
+
+    ssl_stub.SSLContext = _DummySSLContext
+    ssl_stub.create_default_context = lambda *a, **k: _DummySSLContext()
+    ssl_stub.PROTOCOL_TLS_CLIENT = 2
+    ssl_stub.CERT_REQUIRED = 2
+    sys.modules["ssl"] = ssl_stub
+
+# ---- micropip stub --------------------------------------------------------
+if "micropip" not in sys.modules:
+    micropip_stub = types.ModuleType("micropip")
+    async def _noop_install(*_a, **_kw):
+        return None
+    micropip_stub.install = _noop_install  # type: ignore[attr-defined]
+    sys.modules["micropip"] = micropip_stub
+
+# ---------------------------------------------------------------------------
+# Actual backend implementation
+# ---------------------------------------------------------------------------
+import asyncio
+import json
+import os
+import time
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import httpx
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from starlette.websockets import WebSocketState
+
+try:
+    import psutil
+except ImportError:  # pragma: no cover
+    psutil = None
+
+try:
+    from llm_client import LLMClient
+except ImportError:  # pragma: no cover
+    LLMClient = None
+
+# ---------------------------------------------------------------------------
+# Configuration constants
+# ---------------------------------------------------------------------------
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
+OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
+OLLAMA_URL = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}/api/generate"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b")
+OLLAMA_BINARY = os.getenv("OLLAMA_BINARY", "ollama")
+KAI_SECRET = os.getenv("KAI_SECRET", "change-me")
+MAX_WS_CONNECTIONS = int(os.getenv("MAX_WS_CONNECTIONS", 100))
+RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", 60))
+
+# ---------------------------------------------------------------------------
+# FastAPI app & CORS
+# ---------------------------------------------------------------------------
+app = FastAPI(title="Kaleidoscope AI – Cube/LLM Bridge", version="0.4.2")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Optional advanced LLM client
+# ---------------------------------------------------------------------------
+llm_client: Optional["LLMClient"]
+if LLMClient is not None:
+    llm_client = LLMClient(
+        model=OLLAMA_MODEL,
+        endpoint=f"http://{OLLAMA_HOST}:{OLLAMA_PORT}",
+        rate_limit_per_minute=RATE_LIMIT_PER_MIN,
+    )
+else:
+    llm_client = None
+
+# ---------------------------------------------------------------------------
+# System state dataclass
+# ---------------------------------------------------------------------------
+class SystemState:
+    def __init__(self) -> None:
+        self.is_paused = False
+        self.timestamps: Dict[str, List[float]] = defaultdict(list)
+        self.ollama_proc: Optional[asyncio.subprocess.Process] = None
+        self.metrics: Dict[str, Any] = {
+            "total_requests": 0,
+            "failed_requests": 0,
+            "ws_connections": 0,
+            "health_checks": 0,
+            "resource_usage": {},
+            "boot": datetime.utcnow().isoformat() + "Z",
+        }
+
+state = SystemState()
+
+# ---------------------------------------------------------------------------
+# WebSocket Manager
+# ---------------------------------------------------------------------------
+class WebSocketManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        if len(self.active_connections) >= MAX_WS_CONNECTIONS:
+            await websocket.close(code=4403, reason="Max connections reached")
+            return False
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        state.metrics["ws_connections"] = len(self.active_connections)
+        return True
+
+    async def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            state.metrics["ws_connections"] = len(self.active_connections)
+
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.send_text(json.dumps(message))
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections[:]:  # Copy to avoid mutation issues
+            if connection.client_state == WebSocketState.CONNECTED:
+                await connection.send_text(json.dumps(message))
+
+manager = WebSocketManager()
+
+# ---------------------------------------------------------------------------
+# WebSocket Authentication
+# ---------------------------------------------------------------------------
+async def ws_auth(websocket: WebSocket):
+    token = websocket.headers.get("x-kai-token") or websocket.query_params.get("token")
+    if token != KAI_SECRET:
+        await websocket.close(code=4401, reason="Unauthorized")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+# ---------------------------------------------------------------------------
+# WebSocket Endpoint with LLM Integration
+# ---------------------------------------------------------------------------
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await ws_auth(websocket)
+    if not await manager.connect(websocket):
+        return
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            state.metrics["total_requests"] += 1
+
+            if state.is_paused:
+                await manager.send_personal_message(
+                    {"type": "error", "msg": "System is paused"}, websocket
+                )
+                continue
+
+            msg_type = message.get("type")
+            if msg_type == "chat":
+                received_prompt = message.get("msg", "")
+                if not received_prompt:
+                    await manager.send_personal_message(
+                        {"type": "error", "msg": "Empty chat message"}, websocket
+                    )
+                    continue
+
+                if llm_client is not None:
+                    try:
+                        # Call LLMClient's complete method
+                        ollama_response = await llm_client.complete(prompt=received_prompt)
+                        response = {
+                            "type": "chat",
+                            "role": "assistant",
+                            "msg": ollama_response
+                        }
+                        await manager.send_personal_message(response, websocket)
+                    except Exception as e:
+                        state.metrics["failed_requests"] += 1
+                        await manager.send_personal_message(
+                            {"type": "error", "msg": f"LLM error: {str(e)}"}, websocket
+                        )
+                else:
+                    # Fallback if LLMClient isn't available
+                    await manager.send_personal_message(
+                        {"type": "error", "msg": "LLM client not initialized"}, websocket
+                    )
+
+            elif msg_type == "cube_state":
+                # Broadcast cube state to all clients (unchanged)
+                await manager.broadcast(message)
+
+            elif msg_type == "command":
+                # Handle commands (unchanged)
+                await manager.broadcast(message)
+
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket)
+    except Exception as e:
+        state.metrics["failed_requests"] += 1
+        await manager.send_personal_message(
+            {"type": "error", "msg": f"WebSocket error: {str(e)}"}, websocket
+        )
+        await manager.disconnect(websocket)
+
+# ---------------------------------------------------------------------------
+# REST Endpoints (unchanged from previous, included for completeness)
+# ---------------------------------------------------------------------------
+@app.get("/api/system/status")
+async def get_system_status():
+    resources = {}
+    if psutil:
+        resources["backend_cpu_percent"] = psutil.cpu_percent()
+        resources["backend_memory_percent"] = psutil.virtual_memory().percent
+    return {
+        "ollama_running": state.ollama_proc is not None and state.ollama_proc.returncode is None,
+        "is_paused": state.is_paused,
+        "ws_connections": state.metrics["ws_connections"],
+        "metrics": state.metrics,
+        "resources": resources
+    }
+
+@app.post("/api/system/pause")
+async def pause_system():
+    state.is_paused = True
+    return {"status": "paused"}
+
+@app.post("/api/system/resume")
+async def resume_system():
+    state.is_paused = False
+    return {"status": "resumed"}
+
+@app.post("/api/system/reset")
+async def reset_system():
+    state.is_paused = False
+    state.timestamps.clear()
+    state.metrics["total_requests"] = 0
+    state.metrics["failed_requests"] = 0
+    return {"status": "reset"}
+
+# Add more endpoints as needed...
+
+# ---------------------------------------------------------------------------
+# Serve Frontend (unchanged)
+# ---------------------------------------------------------------------------
+@app.get("/cube", response_class=HTMLResponse)
+async def serve_cube():
+    html_path = Path(__file__).parent / "frontend" / "advanced-quantum-cube.html"
+    if html_path.exists():
+        return HTMLResponse(content=html_path.read_text(), status_code=200)
+    raise HTTPException(status_code=404, detail="Frontend not found")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

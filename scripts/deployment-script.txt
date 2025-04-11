@@ -1,0 +1,487 @@
+#!/usr/bin/env python3
+"""
+Quantum Kaleidoscope Deployment Script
+=====================================
+
+This script automates the deployment of the Enhanced Autonomous Quantum Kaleidoscope system.
+It handles installation, configuration, and launching the system with proper dependencies.
+"""
+
+import os
+import sys
+import time
+import subprocess
+import argparse
+import logging
+import shutil
+import urllib.request
+import zipfile
+import json
+import random
+import platform
+import socket
+import signal
+from typing import List, Dict, Any, Optional, Tuple
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("KaleidoscopeDeployer")
+
+class KaleidoscopeDeployer:
+    """Handles the deployment of the Quantum Kaleidoscope system."""
+    
+    def __init__(self, install_dir: str = "./quantum_kaleidoscope",
+                 data_dir: str = "./data",
+                 config_file: str = None,
+                 ports: Tuple[int, int] = (8000, 8080)):
+        self.install_dir = os.path.abspath(install_dir)
+        self.data_dir = os.path.abspath(data_dir)
+        self.config_file = config_file
+        self.main_port, self.visualizer_port = ports
+        
+        # Configuration defaults
+        self.config = {
+            "system": {
+                "dimension": 128,
+                "auto_discovery": True,
+                "max_active_nodes": 1000
+            },
+            "crawler": {
+                "max_threads": 5,
+                "rate_limit": 1.0,
+                "respect_robots": True,
+                "user_agent": "QuantumKaleidoscope/1.0"
+            },
+            "seed_urls": [
+                "https://en.wikipedia.org/wiki/Quantum_computing",
+                "https://en.wikipedia.org/wiki/Machine_learning",
+                "https://en.wikipedia.org/wiki/Data_visualization"
+            ]
+        }
+        
+        # Process ID file
+        self.pid_file = os.path.join(self.data_dir, "kaleidoscope.pid")
+        
+        logger.info(f"Deployer initialized with install_dir={install_dir}, data_dir={data_dir}")
+    
+    def check_prerequisites(self) -> bool:
+        """Check if the system meets all prerequisites."""
+        logger.info("Checking prerequisites...")
+        
+        # Check Python version
+        python_version = platform.python_version_tuple()
+        if int(python_version[0]) < 3 or (int(python_version[0]) == 3 and int(python_version[1]) < 6):
+            logger.error(f"Python 3.6+ required, found {platform.python_version()}")
+            return False
+        
+        # Check available disk space
+        try:
+            # Get free space in bytes and convert to GB
+            if platform.system() == 'Windows':
+                free_space = shutil.disk_usage(self.install_dir).free / (1024**3)
+            else:
+                stat = os.statvfs(self.install_dir)
+                free_space = (stat.f_frsize * stat.f_bavail) / (1024**3)
+            
+            if free_space < 1.0:  # Less than 1 GB free
+                logger.warning(f"Low disk space: {free_space:.2f} GB available")
+                return False
+            
+            logger.info(f"Disk space check passed: {free_space:.2f} GB available")
+        except Exception as e:
+            logger.error(f"Error checking disk space: {e}")
+            return False
+        
+        # Check if ports are available
+        for port in [self.main_port, self.visualizer_port]:
+            if not self._is_port_available(port):
+                logger.error(f"Port {port} is already in use")
+                return False
+        
+        logger.info("All prerequisites check passed")
+        return True
+    
+    def _is_port_available(self, port: int) -> bool:
+        """Check if a port is available to use."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', port))
+            sock.close()
+            return result != 0
+        except Exception:
+            return False
+    
+    def load_config(self) -> bool:
+        """Load configuration from file if provided."""
+        if not self.config_file:
+            logger.info("No config file specified, using defaults")
+            return True
+            
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    loaded_config = json.load(f)
+                
+                # Update config with loaded values
+                for section, values in loaded_config.items():
+                    if section in self.config:
+                        self.config[section].update(values)
+                    else:
+                        self.config[section] = values
+                
+                logger.info(f"Loaded configuration from {self.config_file}")
+                return True
+            else:
+                logger.warning(f"Config file {self.config_file} not found, using defaults")
+                return True
+        except Exception as e:
+            logger.error(f"Error loading config: {e}")
+            return False
+    
+    def install(self) -> bool:
+        """Install the Quantum Kaleidoscope system."""
+        logger.info("Starting installation...")
+        
+        # Create directories
+        os.makedirs(self.install_dir, exist_ok=True)
+        os.makedirs(self.data_dir, exist_ok=True)
+        
+        # Copy files to installation directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        main_files = [
+            "enhanced_autonomous_kaleidoscope.py",
+            "quantum_kaleidoscope_launcher.py",
+            "quantum_visualization.py",
+            "unified_quantum_kaleidoscope.py",
+            "visualization_integration.py"
+        ]
+        
+        for file in main_files:
+            src_path = os.path.join(script_dir, file)
+            dst_path = os.path.join(self.install_dir, file)
+            
+            if os.path.exists(src_path):
+                shutil.copy2(src_path, dst_path)
+                logger.info(f"Copied {file} to {dst_path}")
+            else:
+                logger.warning(f"Source file {src_path} not found, skipping")
+        
+        # Make scripts executable
+        for file in main_files:
+            path = os.path.join(self.install_dir, file)
+            if os.path.exists(path) and platform.system() != 'Windows':
+                os.chmod(path, 0o755)
+        
+        # Create directory structure
+        os.makedirs(os.path.join(self.data_dir, "models"), exist_ok=True)
+        
+        # Create configuration file in data directory
+        config_path = os.path.join(self.data_dir, "config.json")
+        with open(config_path, 'w') as f:
+            json.dump(self.config, f, indent=2)
+        logger.info(f"Created configuration file at {config_path}")
+        
+        # Create static directory for web assets
+        static_dir = os.path.join(self.install_dir, "static")
+        os.makedirs(static_dir, exist_ok=True)
+        
+        # Create CSS subdirectory
+        css_dir = os.path.join(static_dir, "css")
+        os.makedirs(css_dir, exist_ok=True)
+        
+        # Create JS subdirectory
+        js_dir = os.path.join(static_dir, "js")
+        os.makedirs(js_dir, exist_ok=True)
+        
+        # Copy template files if available
+        template_files = {
+            "index.html": os.path.join(static_dir, "index.html"),
+            "visualization.html": os.path.join(static_dir, "visualization.html"),
+            "style.css": os.path.join(css_dir, "style.css"),
+            "visualizer.js": os.path.join(js_dir, "visualizer.js"),
+            "api.js": os.path.join(js_dir, "api.js")
+        }
+        
+        for template, dest in template_files.items():
+            src_path = os.path.join(script_dir, "templates", template)
+            if os.path.exists(src_path):
+                shutil.copy2(src_path, dest)
+                logger.info(f"Copied template {template} to {dest}")
+            else:
+                logger.warning(f"Template file {src_path} not found, will be generated at runtime")
+        
+        logger.info("Installation completed successfully")
+        return True
+    
+    def start(self) -> bool:
+        """Start the Quantum Kaleidoscope system."""
+        logger.info("Starting the Autonomous Quantum Kaleidoscope system...")
+        
+        # Check if already running
+        if self._is_running():
+            logger.error("Quantum Kaleidoscope system is already running")
+            return False
+        
+        # Construct command
+        launcher_script = os.path.join(self.install_dir, "quantum_kaleidoscope_launcher.py")
+        
+        if not os.path.exists(launcher_script):
+            logger.error(f"Launcher script not found at {launcher_script}")
+            return False
+        
+        cmd = [
+            sys.executable,
+            launcher_script,
+            "--data-dir", self.data_dir,
+            "--main-port", str(self.main_port),
+            "--visualizer-port", str(self.visualizer_port)
+        ]
+        
+        # Add auto-gen flag if enabled
+        if self.config["system"].get("auto_discovery", False):
+            cmd.append("--auto-gen")
+        
+        try:
+            # Start the process
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True  # Detach from parent process
+            )
+            
+            # Write PID to file
+            with open(self.pid_file, 'w') as f:
+                f.write(str(process.pid))
+            
+            # Wait briefly to see if it starts properly
+            time.sleep(3)
+            
+            if process.poll() is not None:
+                # Process exited already
+                stderr = process.stderr.read()
+                logger.error(f"Process exited immediately with error: {stderr}")
+                return False
+            
+            logger.info(f"Autonomous Quantum Kaleidoscope started with PID {process.pid}")
+            logger.info(f"Main system URL: http://localhost:{self.main_port}")
+            logger.info(f"Visualizer URL: http://localhost:{self.visualizer_port}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error starting system: {e}")
+            return False
+    
+    def stop(self) -> bool:
+        """Stop the Quantum Kaleidoscope system."""
+        logger.info("Stopping the Autonomous Quantum Kaleidoscope system...")
+        
+        if not os.path.exists(self.pid_file):
+            logger.warning("PID file not found, system may not be running")
+            return True
+        
+        try:
+            # Read PID from file
+            with open(self.pid_file, 'r') as f:
+                pid = int(f.read().strip())
+            
+            # Attempt graceful termination
+            if platform.system() == 'Windows':
+                subprocess.run(['taskkill', '/PID', str(pid), '/F'], check=False)
+            else:
+                # Send SIGTERM
+                os.kill(pid, signal.SIGTERM)
+                
+                # Wait for process to terminate
+                for _ in range(10):
+                    time.sleep(1)
+                    try:
+                        # Check if process still exists
+                        os.kill(pid, 0)
+                    except OSError:
+                        # Process has terminated
+                        break
+                else:
+                    # Force kill if still running
+                    logger.warning("Process did not terminate gracefully, sending SIGKILL")
+                    os.kill(pid, signal.SIGKILL)
+            
+            # Remove PID file
+            os.remove(self.pid_file)
+            
+            logger.info(f"Stopped Quantum Kaleidoscope system (PID {pid})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error stopping system: {e}")
+            return False
+    
+    def status(self) -> Dict[str, Any]:
+        """Check the status of the Quantum Kaleidoscope system."""
+        running = self._is_running()
+        
+        status = {
+            "running": running,
+            "install_dir": self.install_dir,
+            "data_dir": self.data_dir,
+            "main_port": self.main_port,
+            "visualizer_port": self.visualizer_port
+        }
+        
+        if running:
+            # Get PID
+            with open(self.pid_file, 'r') as f:
+                pid = int(f.read().strip())
+            status["pid"] = pid
+            
+            # Try to get more detailed status from the API
+            try:
+                url = f"http://localhost:{self.main_port}/api/status"
+                response = urllib.request.urlopen(url, timeout=5)
+                api_status = json.loads(response.read().decode('utf-8'))
+                status["system_status"] = api_status
+            except Exception as e:
+                logger.warning(f"Could not get detailed status: {e}")
+        
+        return status
+    
+    def _is_running(self) -> bool:
+        """Check if the system is running."""
+        if not os.path.exists(self.pid_file):
+            return False
+        
+        try:
+            # Read PID from file
+            with open(self.pid_file, 'r') as f:
+                pid = int(f.read().strip())
+            
+            # Check if process is running
+            if platform.system() == 'Windows':
+                # Windows implementation
+                output = subprocess.check_output(['tasklist', '/FI', f'PID eq {pid}'])
+                return str(pid) in output.decode()
+            else:
+                # Unix implementation
+                os.kill(pid, 0)
+                return True
+        except (ProcessLookupError, FileNotFoundError, ValueError, subprocess.CalledProcessError):
+            return False
+        except Exception:
+            return False
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="Quantum Kaleidoscope Deployment Tool")
+    
+    # Command subparsers
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    
+    # Install command
+    install_parser = subparsers.add_parser("install", help="Install the system")
+    install_parser.add_argument("--install-dir", type=str, default="./quantum_kaleidoscope", help="Installation directory")
+    install_parser.add_argument("--data-dir", type=str, default="./data", help="Data directory")
+    install_parser.add_argument("--config", type=str, help="Configuration file path")
+    
+    # Start command
+    start_parser = subparsers.add_parser("start", help="Start the system")
+    start_parser.add_argument("--install-dir", type=str, default="./quantum_kaleidoscope", help="Installation directory")
+    start_parser.add_argument("--data-dir", type=str, default="./data", help="Data directory")
+    start_parser.add_argument("--port", type=int, default=8000, help="Main port")
+    start_parser.add_argument("--visualizer-port", type=int, default=8080, help="Visualizer port")
+    
+    # Stop command
+    stop_parser = subparsers.add_parser("stop", help="Stop the system")
+    stop_parser.add_argument("--data-dir", type=str, default="./data", help="Data directory")
+    
+    # Status command
+    status_parser = subparsers.add_parser("status", help="Check system status")
+    status_parser.add_argument("--data-dir", type=str, default="./data", help="Data directory")
+    status_parser.add_argument("--port", type=int, default=8000, help="Main port")
+    
+    args = parser.parse_args()
+    
+    if args.command == "install":
+        deployer = KaleidoscopeDeployer(
+            install_dir=args.install_dir,
+            data_dir=args.data_dir,
+            config_file=args.config
+        )
+        
+        if deployer.check_prerequisites() and deployer.load_config():
+            if deployer.install():
+                logger.info("Installation successful")
+                return 0
+        
+        logger.error("Installation failed")
+        return 1
+    
+    elif args.command == "start":
+        deployer = KaleidoscopeDeployer(
+            install_dir=args.install_dir,
+            data_dir=args.data_dir,
+            ports=(args.port, args.visualizer_port)
+        )
+        
+        if deployer.load_config() and deployer.start():
+            logger.info("System started successfully")
+            return 0
+        
+        logger.error("Failed to start system")
+        return 1
+    
+    elif args.command == "stop":
+        deployer = KaleidoscopeDeployer(data_dir=args.data_dir)
+        
+        if deployer.stop():
+            logger.info("System stopped successfully")
+            return 0
+        
+        logger.error("Failed to stop system")
+        return 1
+    
+    elif args.command == "status":
+        deployer = KaleidoscopeDeployer(
+            data_dir=args.data_dir,
+            ports=(args.port, 8080)
+        )
+        
+        status = deployer.status()
+        
+        print("\n=== Quantum Kaleidoscope Status ===")
+        print(f"Running: {'Yes' if status['running'] else 'No'}")
+        print(f"Installation directory: {status['install_dir']}")
+        print(f"Data directory: {status['data_dir']}")
+        print(f"Main port: {status['main_port']}")
+        print(f"Visualizer port: {status['visualizer_port']}")
+        
+        if status['running']:
+            print(f"Process ID: {status.get('pid', 'Unknown')}")
+            print("\nSystem URLs:")
+            print(f"  Main system: http://localhost:{status['main_port']}")
+            print(f"  Visualizer: http://localhost:{status['visualizer_port']}")
+            
+            if 'system_status' in status:
+                sys_status = status['system_status']
+                print("\nSystem Statistics:")
+                print(f"  Uptime: {sys_status.get('uptime_formatted', 'Unknown')}")
+                print(f"  Nodes: {sys_status.get('node_count', 'Unknown')}")
+                print(f"  Processed Texts: {sys_status.get('processed_texts', 'Unknown')}")
+                print(f"  Web Pages Processed: {sys_status.get('web_pages_processed', 'Unknown')}")
+                print(f"  Insights Generated: {sys_status.get('insights_generated', 'Unknown')}")
+        
+        return 0
+    
+    else:
+        parser.print_help()
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""
+Quantum Kaleidoscope Deployment Script Fix
+=========================================
+
+This script applies a targeted fix to the Quantum Kaleidoscope deployment script
+to ensure directories are created before disk space checks are performed.
+"""
+
+import os
+import sys
+import logging
+import shutil
+import argparse
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("DeploymentFix")
+
+def fix_deployment_script(script_path):
+    """Fix the deployment script to properly create directories before checking disk space."""
+    if not os.path.exists(script_path):
+        logger.error(f"Deployment script not found at {script_path}")
+        return False
+    
+    # Create backup
+    backup_path = script_path + '.bak'
+    shutil.copy2(script_path, backup_path)
+    logger.info(f"Created backup of deployment script at {backup_path}")
+    
+    # Read script content
+    with open(script_path, 'r') as f:
+        content = f.read()
+    
+    # Find the check_prerequisites method
+    if "def check_prerequisites(self)" not in content:
+        logger.error("Could not find check_prerequisites method in deployment script")
+        return False
+    
+    # Find method start and end
+    start_idx = content.find("def check_prerequisites(self)")
+    end_idx = content.find("def", start_idx + 10)
+    if end_idx == -1:  # If this is the last method
+        end_idx = len(content)
+    
+    # Extract the method
+    old_method = content[start_idx:end_idx]
+    
+    # Check if already fixed
+    if "os.makedirs(self.install_dir, exist_ok=True)" in old_method:
+        logger.info("Deployment script already fixed")
+        return True
+    
+    # Find where to insert directory creation code
+    lines = old_method.split('\n')
+    insert_idx = 0
+    for i, line in enumerate(lines):
+        if "Checking prerequisites" in line:
+            insert_idx = i + 1
+            break
+    
+    # Insert directory creation code
+    dir_creation_code = """
+        # Create necessary directories before checking disk space
+        try:
+            os.makedirs(self.install_dir, exist_ok=True)
+            os.makedirs(self.data_dir, exist_ok=True)
+            logger.info(f"Created installation directories: {self.install_dir}, {self.data_dir}")
+        except Exception as e:
+            logger.error(f"Error creating directories: {e}")
+            return False
+"""
+    
+    if insert_idx > 0:
+        lines.insert(insert_idx, dir_creation_code)
+    else:
+        # Fallback: add after method definition
+        lines.insert(1, dir_creation_code)
+    
+    # Recreate the method
+    new_method = '\n'.join(lines)
+    
+    # Replace in content
+    new_content = content.replace(old_method, new_method)
+    
+    # Write back to file
+    with open(script_path, 'w') as f:
+        f.write(new_content)
+    
+    logger.info("Successfully fixed deployment script")
+    return True
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="Quantum Kaleidoscope Deployment Fix")
+    parser.add_argument("--script", type=str, default="./deployment-script.py", 
+                        help="Path to deployment script")
+    
+    args = parser.parse_args()
+    
+    print(f"Applying fix to deployment script: {args.script

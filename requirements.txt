@@ -1,0 +1,10 @@
+numpy
+scipy
+networkx
+matplotlib
+plotly # For visualization
+transformers[torch] # Or transformers[tensorflow]
+torch # Or tensorflow
+spacy
+# Add other specific dependencies like Pillow, opencv-python if VisualNode is implemented
+# Add Flask, Flask-SocketIO if building the web interface from main.py

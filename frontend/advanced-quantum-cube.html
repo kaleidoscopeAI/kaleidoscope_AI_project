@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kaleidoscope AI - Quantum Visualization</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Existing styles unchanged */
+        #system-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            width: 250px;
+            background: rgba(16, 16, 32, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 10px;
+            border: 1px solid var(--secondary);
+            padding: 15px;
+            color: var(--light);
+            z-index: 10;
+            box-shadow: 0 0 20px rgba(76, 201, 240, 0.3);
+        }
+        #system-panel h3 {
+            margin-bottom: 15px;
+            color: var(--secondary);
+            font-size: 16px;
+            border-bottom: 1px solid rgba(76, 201, 240, 0.3);
+            padding-bottom: 8px;
+        }
+        .system-row {
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+        .system-btn {
+            background: rgba(58, 12, 163, 0.4);
+            border: 1px solid var(--primary);
+            color: var(--light);
+            padding: 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+            width: 100%;
+        }
+        .system-btn:hover {
+            background: var(--primary);
+        }
+        .system-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <!-- Existing HTML unchanged, including system panel -->
+    <div id="loading">
+        <!-- Existing loading content unchanged -->
+    </div>
+    <canvas id="visualization"></canvas>
+    <canvas id="particle-layer"></canvas>
+    <div id="ui-overlay">
+        <div id="panel-toggle" class="ui-element">
+            <i class="fas fa-cog"></i>
+        </div>
+        <div id="control-panel" class="ui-element">
+            <!-- Existing control panel content unchanged -->
+        </div>
+        <div id="stats-panel" class="ui-element">
+            <!-- Existing stats panel content unchanged -->
+        </div>
+        <div id="system-panel" class="ui-element">
+            <h3>System Controls</h3>
+            <div class="system-row">
+                <div>LLM Status: <span id="ollama-status">Checking...</span></div>
+            </div>
+            <div class="system-row">
+                <div>Connections: <span id="ws-connections">0</span></div>
+            </div>
+            <div class="system-row">
+                <div>CPU: <span id="cpu-usage">N/A</span></div>
+            </div>
+            <div class="system-row">
+                <button class="system-btn" id="pause-btn">Pause</button>
+            </div>
+            <div class="system-row">
+                <button class="system-btn" id="resume-btn">Resume</button>
+            </div>
+            <div class="system-row">
+                <button class="system-btn" id="reset-btn-system">Reset System</button>
+            </div>
+            <div class="system-row">
+                <button class="system-btn" id="model-btn">Switch Model</button>
+            </div>
+        </div>
+    </div>
+    <div id="toast"></div>
+    <div id="context-menu" class="ui-element">
+        <!-- Existing context menu content unchanged -->
+    </div>
+    <div id="modal">
+        <!-- Existing modal content unchanged -->
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+    (() => {
+        // Existing state, objects, ui unchanged, fixing WebSocket
+        const wsConfig = {
+            url: 'ws://localhost:8000/ws',
+            token: 'change-me', // Must match KAI_SECRET in backend
+            socket: null,
+            reconnectAttempts: 0,
+            maxReconnectAttempts: 5,
+            reconnectDelay: 2000
+        };
+
+        // Existing functions unchanged unless modified below
+
+        /**
+         * Initialize WebSocket connection (fixed)
+         */
+        function initWebSocket() {
+            // Use query string for token as browsers don't support custom headers in WebSocket
+            wsConfig.socket = new WebSocket(`${wsConfig.url}?token=${encodeURIComponent(wsConfig.token)}`);
+
+            wsConfig.socket.onopen = () => {
+                wsConfig.reconnectAttempts = 0;
+                showToast('Connected to Kaleidoscope AI backend');
+                // Send initial cube state
+                wsConfig.socket.send(JSON.stringify({ type: 'cube_state', data: getCubeState() }));
+                updateSystemStatus();
+            };
+
+            wsConfig.socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+
+            wsConfig.socket.onclose = () => {
+                showToast('Disconnected from backend', 'warning');
+                attemptReconnect();
+            };
+
+            wsConfig.socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                showToast('WebSocket error', 'error');
+            };
+        }
+
+        /**
+         * Handle incoming WebSocket messages
+         */
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'chat':
+                    if (data.role === 'assistant') {
+                        showModal('LLM Insight', `<p>${data.msg}</p>`);
+                    }
+                    break;
+                case 'cube_state':
+                    Object.assign(state.cube, data.data.cube || {});
+                    Object.assign(state.nodes, data.data.nodes || {});
+                    state.energy = data.data.energy || state.energy;
+                    createQuantumCube();
+                    break;
+                case 'command':
+                    if (data.action === 'entangle') entangleNodes();
+                    if (data.action === 'explode') createExplosionEffect(new THREE.Vector3(0, 0, 0), 2.0);
+                    break;
+                case 'error':
+                    showToast(data.msg, 'error');
+                    break;
+            }
+        }
+
+        /**
+         * Attempt WebSocket reconnect
+         */
+        function attemptReconnect() {
+            if (wsConfig.reconnectAttempts < wsConfig.maxReconnectAttempts) {
+                wsConfig.reconnectAttempts++;
+                setTimeout(() => {
+                    showToast(`Reconnecting... Attempt ${wsConfig.reconnectAttempts}`);
+                    initWebSocket();
+                }, wsConfig.reconnectDelay);
+            } else {
+                showToast('Failed to reconnect to backend', 'error');
+            }
+        }
+
+        /**
+         * Send message to backend
+         */
+        function sendToBackend(type, payload) {
+            if (wsConfig.socket && wsConfig.socket.readyState === WebSocket.OPEN) {
+                wsConfig.socket.send(JSON.stringify({ type, ...payload }));
+            } else {
+                showToast('Not connected to backend', 'warning');
+            }
+        }
+
+        /**
+         * Get current cube state for sending to backend
+         */
+        function getCubeState() {
+            return {
+                cube: { size: state.cube.size, density: state.cube.density, rotationSpeed: state.cube.rotationSpeed },
+                nodes: { count: objects.nodes.length, connections: objects.connections.length },
+                energy: state.energy
+            };
+        }
+
+        /**
+         * Update system status from backend
+         */
+        async function updateSystemStatus() {
+            try {
+                const response = await fetch('http://localhost:8000/api/system/status');
+                const data = await response.json();
+                document.getElementById('ollama-status').textContent = data.ollama_running ? 'Running

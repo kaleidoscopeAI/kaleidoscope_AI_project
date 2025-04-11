@@ -1,0 +1,698 @@
+#!/usr/bin/env python3
+"""
+Quantum Kaleidoscope Integrator
+===============================
+
+A specialized integration tool for the Quantum Kaleidoscope system that fixes visualization
+integration issues, patches necessary components, and ensures proper system operation.
+
+This script analyzes your existing installation, identifies missing components,
+and applies targeted fixes to create a seamless integration between the quantum
+engine and visualization subsystems.
+"""
+
+import os
+import sys
+import time
+import json
+import shutil
+import logging
+import argparse
+import subprocess
+import importlib.util
+from typing import Dict, List, Any, Optional, Tuple
+from pathlib import Path
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("QuantumIntegrator")
+
+class QuantumKaleidoscopeIntegrator:
+    """Advanced integration tool for Quantum Kaleidoscope system."""
+    
+    def __init__(self, base_dir=".", data_dir="./data"):
+        """Initialize integrator with base and data directories."""
+        self.base_dir = os.path.abspath(base_dir)
+        self.data_dir = os.path.abspath(data_dir)
+        
+        # Ensure data directory exists
+        os.makedirs(self.data_dir, exist_ok=True)
+        
+        # Key file definitions
+        self.files = {
+            "deployment": os.path.join(self.base_dir, "deployment-script.py"),
+            "launcher": os.path.join(self.base_dir, "quantum_kaleidoscope_launcher.py"),
+            "engine": os.path.join(self.base_dir, "unified_quantum_kaleidoscope.py"),
+            "visualization": os.path.join(self.base_dir, "quantum_visualization.py"),
+            "integration": os.path.join(self.base_dir, "visualization-integration.py"),
+        }
+        
+        # Backup directory
+        self.backup_dir = os.path.join(self.base_dir, "backups")
+        os.makedirs(self.backup_dir, exist_ok=True)
+        
+        logger.info(f"Integrator initialized with base_dir={base_dir}, data_dir={data_dir}")
+    
+    def analyze_installation(self) -> Dict[str, Any]:
+        """Analyze the current installation and identify issues."""
+        analysis = {
+            "status": "incomplete",
+            "missing_files": [],
+            "issues": [],
+            "recommendations": []
+        }
+        
+        # Check for key files
+        for name, path in self.files.items():
+            if not os.path.exists(path):
+                analysis["missing_files"].append(name)
+                analysis["issues"].append(f"Missing {name} file at {path}")
+        
+        # If deployment script exists, check for directory creation issue
+        if "deployment" not in analysis["missing_files"]:
+            with open(self.files["deployment"], 'r') as f:
+                content = f.read()
+                if "os.makedirs(self.install_dir, exist_ok=True)" not in content:
+                    analysis["issues"].append("Deployment script missing directory creation before disk check")
+                    analysis["recommendations"].append("Fix deployment script to create directories before checking disk space")
+        
+        # If launcher exists, check for visualization integration
+        if "launcher" not in analysis["missing_files"]:
+            with open(self.files["launcher"], 'r') as f:
+                content = f.read()
+                if "visualization" not in content.lower() or "get_visualization_data" not in content:
+                    analysis["issues"].append("Launcher script missing proper visualization integration")
+                    analysis["recommendations"].append("Patch launcher to properly integrate visualization component")
+        
+        # Overall status
+        if not analysis["issues"]:
+            analysis["status"] = "complete"
+        elif len(analysis["issues"]) <= 2:
+            analysis["status"] = "partial"
+        
+        return analysis
+    
+    def create_backup(self, filename: str) -> str:
+        """Create a backup of a file."""
+        if not os.path.exists(filename):
+            logger.warning(f"Cannot backup non-existent file: {filename}")
+            return ""
+            
+        # Create timestamp
+        timestamp = time.strftime("%Y%m%d%H%M%S")
+        
+        # Get base filename
+        base_name = os.path.basename(filename)
+        
+        # Create backup filename
+        backup_filename = os.path.join(self.backup_dir, f"{base_name}.{timestamp}.bak")
+        
+        # Copy file
+        shutil.copy2(filename, backup_filename)
+        logger.info(f"Created backup: {backup_filename}")
+        
+        return backup_filename
+    
+    def fix_deployment_script(self) -> bool:
+        """Fix the deployment script to create directories before checking disk space."""
+        deployment_file = self.files["deployment"]
+        
+        if not os.path.exists(deployment_file):
+            logger.error(f"Deployment script not found at {deployment_file}")
+            return False
+            
+        # Create backup
+        self.create_backup(deployment_file)
+        
+        # Read the script
+        with open(deployment_file, 'r') as f:
+            content = f.read()
+        
+        # Look for check_prerequisites method
+        if "def check_prerequisites(self)" not in content:
+            logger.error("Could not find check_prerequisites method in deployment script")
+            return False
+        
+        # Find method boundaries
+        start_idx = content.find("def check_prerequisites(self)")
+        next_method = content.find("def ", start_idx + 10)
+        if next_method == -1:
+            end_idx = len(content)
+        else:
+            end_idx = next_method
+        
+        old_method = content[start_idx:end_idx]
+        
+        # Create new method with directory creation
+        new_method = """def check_prerequisites(self) -> bool:
+        """Check if the system meets all prerequisites."""
+        logger.info("Checking prerequisites...")
+        
+        # Create necessary directories before checking disk space
+        try:
+            os.makedirs(self.install_dir, exist_ok=True)
+            os.makedirs(self.data_dir, exist_ok=True)
+            logger.info(f"Created installation directories: {self.install_dir}, {self.data_dir}")
+        except Exception as e:
+            logger.error(f"Error creating directories: {e}")
+            return False
+        
+        # Check Python version
+        python_version = platform.python_version_tuple()
+        if int(python_version[0]) < 3 or (int(python_version[0]) == 3 and int(python_version[1]) < 6):
+            logger.error(f"Python 3.6+ required, found {platform.python_version()}")
+            return False
+        
+        # Check available disk space
+        try:
+            # Get free space in bytes and convert to GB
+            if platform.system() == 'Windows':
+                free_space = shutil.disk_usage(self.install_dir).free / (1024**3)
+            else:
+                stat = os.statvfs(self.install_dir)
+                free_space = (stat.f_frsize * stat.f_bavail) / (1024**3)
+            
+            if free_space < 1.0:  # Less than 1 GB free
+                logger.warning(f"Low disk space: {free_space:.2f} GB available")
+                return False
+            
+            logger.info(f"Disk space check passed: {free_space:.2f} GB available")
+        except Exception as e:
+            logger.error(f"Error checking disk space: {e}")
+            return False
+        
+        # Check if ports are available
+        for port in [self.main_port, self.visualizer_port]:
+            if not self._is_port_available(port):
+                logger.error(f"Port {port} is already in use")
+                return False
+        
+        logger.info("All prerequisites check passed")
+        return True"""
+        
+        # Replace old method with new method
+        new_content = content.replace(old_method, new_method)
+        
+        # Write back to file
+        with open(deployment_file, 'w') as f:
+            f.write(new_content)
+        
+        logger.info("Fixed deployment script to create directories before checking disk space")
+        return True
+    
+    def create_visualization_adapter(self) -> bool:
+        """Create or update the visualization integration module."""
+        integration_file = self.files["integration"]
+        
+        # Create backup if file exists
+        if os.path.exists(integration_file):
+            self.create_backup(integration_file)
+        
+        # Integration code
+        adapter_code = """#!/usr/bin/env python3
+\"\"\"
+Quantum Kaleidoscope Visualization Integration
+=============================================
+
+This module provides critical integration between the quantum engine and visualization
+systems. It implements the missing get_visualization_data method and ensures
+proper data transformation for 3D quantum field visualization.
+\"\"\"
+
+import os
+import sys
+import time
+import math
+import json
+import random
+import logging
+import traceback
+from typing import Dict, List, Any, Optional, Tuple
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("VisualizationAdapter")
+
+class QuantumVisualizationAdapter:
+    """
+    Sophisticated adapter that bridges between quantum data structures and
+    the visualization rendering engine. Handles complex transformations and
+    ensures proper data mapping for interactive rendering.
+    """
+    
+    def __init__(self, system, dimension=128):
+        """Initialize the adapter with a reference to the system."""
+        self.system = system
+        self.dimension = dimension
+        self.cache = None
+        self.cache_timestamp = 0
+        self.cache_ttl = 2.0  # Cache time-to-live in seconds
+        
+        logger.info(f"Visualization adapter initialized for {type(system).__name__}")
+    
+    def get_visualization_data(self) -> Dict[str, Any]:
+        """
+        Extract and transform quantum state data for visualization.
+        This is the critical missing method that fixes the AttributeError.
+        
+        Returns:
+            Dict containing nodes and connections in the format expected by visualization
+        """
+        # Check cache first
+        current_time = time.time()
+        if self.cache and current_time - self.cache_timestamp < self.cache_ttl:
+            return self.cache
+        
+        try:
+            # Extract nodes from system
+            nodes_data = self._extract_nodes()
+            
+            # Process nodes for visualization format
+            nodes_viz = []
+            for node_id, node in nodes_data.items():
+                # Create node representation
+                node_viz = self._create_node_representation(node_id, node)
+                if node_viz:
+                    nodes_viz.append(node_viz)
+            
+            # Extract connections between nodes
+            connections_viz = self._extract_connections(nodes_data)
+            
+            # Create visualization data
+            viz_data = {
+                "nodes": nodes_viz,
+                "connections": connections_viz,
+                "timestamp": current_time
+            }
+            
+            # Update cache
+            self.cache = viz_data
+            self.cache_timestamp = current_time
+            
+            return viz_data
+            
+        except Exception as e:
+            logger.error(f"Error generating visualization data: {e}")
+            logger.error(traceback.format_exc())
+            
+            # Return empty data on error
+            return {
+                "nodes": [],
+                "connections": [],
+                "timestamp": current_time,
+                "error": str(e)
+            }
+    
+    def _extract_nodes(self) -> Dict[str, Any]:
+        """Extract nodes from the system using multiple strategies."""
+        # Try different access patterns based on observed system structures
+        if hasattr(self.system, 'engine') and hasattr(self.system.engine, 'nodes'):
+            return self.system.engine.nodes
+        elif hasattr(self.system, 'nodes'):
+            return self.system.nodes
+        elif hasattr(self.system, 'get_nodes'):
+            return self.system.get_nodes()
+        elif hasattr(self.system, 'quantum_engine') and hasattr(self.system.quantum_engine, 'nodes'):
+            return self.system.quantum_engine.nodes
+        
+        logger.warning("Could not find nodes in system, returning empty dict")
+        return {}
+    
+    def _create_node_representation(self, node_id: str, node: Any) -> Dict[str, Any]:
+        """Transform a node object into the visualization representation format."""
+        try:
+            # Handle different node data structures
+            position = self._extract_node_position(node)
+            energy = self._extract_node_attribute(node, 'energy', 0.5)
+            stability = self._extract_node_attribute(node, 'stability', 0.8)
+            metadata = self._extract_node_attribute(node, 'metadata', {})
+            connections = self._count_node_connections(node)
+            
+            # Create standardized node representation
+            return {
+                "id": node_id,
+                "position": position,
+                "energy": float(energy),
+                "stability": float(stability),
+                "metadata": metadata,
+                "numConnections": connections
+            }
+        except Exception as e:
+            logger.error(f"Error creating node representation for {node_id}: {e}")
+            return None
+    
+    def _extract_node_position(self, node: Any) -> List[float]:
+        """Extract position from node with fallbacks for different structures."""
+        position = [0.0, 0.0, 0.0]  # Default position
+        
+        # Try different property paths
+        if hasattr(node, 'position'):
+            position = node.position
+        elif isinstance(node, dict) and 'position' in node:
+            position = node['position']
+        elif hasattr(node, 'data') and hasattr(node.data, 'position'):
+            position = node.data.position
+        elif hasattr(node, 'mesh') and hasattr(node.mesh, 'position'):
+            pos = node.mesh.position
+            position = [pos.x, pos.y, pos.z]
+        
+        # Convert non-list positions to list
+        if hasattr(position, 'x') and hasattr(position, 'y') and hasattr(position, 'z'):
+            position = [position.x, position.y, position.z]
+            
+        # Ensure position is a 3D vector
+        if len(position) < 3:
+            position = list(position) + [0.0] * (3 - len(position))
+        elif len(position) > 3:
+            position = position[:3]
+            
+        return [float(p) for p in position]
+    
+    def _extract_node_attribute(self, node: Any, attr_name: str, default_value: Any) -> Any:
+        """Extract an attribute from node with fallbacks for different structures."""
+        # Try different property paths
+        if hasattr(node, attr_name):
+            return getattr(node, attr_name)
+        elif isinstance(node, dict) and attr_name in node:
+            return node[attr_name]
+        elif hasattr(node, 'data') and hasattr(node.data, attr_name):
+            return getattr(node.data, attr_name)
+        elif isinstance(node, dict) and 'data' in node and attr_name in node['data']:
+            return node['data'][attr_name]
+        
+        return default_value
+    
+    def _count_node_connections(self, node: Any) -> int:
+        """Count connections for a node with different possible structures."""
+        connections = self._extract_node_attribute(node, 'connections', {})
+        
+        if isinstance(connections, dict):
+            return len(connections)
+        elif isinstance(connections, set) or isinstance(connections, list):
+            return len(connections)
+        
+        return 0
+    
+    def _extract_connections(self, nodes_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract all connections between nodes."""
+        connections = []
+        processed_pairs = set()
+        
+        # Process each node's connections
+        for node_id, node in nodes_data.items():
+            node_connections = self._extract_node_attribute(node, 'connections', {})
+            
+            # Handle different connection storage formats
+            if isinstance(node_connections, dict):
+                for other_id, strength in node_connections.items():
+                    self._add_connection(
+                        connections, processed_pairs, 
+                        node_id, other_id, float(strength),
+                        nodes_data
+                    )
+            elif isinstance(node_connections, set) or isinstance(node_connections, list):
+                for other_id in node_connections:
+                    # Use default strength since we don't have explicit values
+                    self._add_connection(
+                        connections, processed_pairs, 
+                        node_id, other_id, 0.5,
+                        nodes_data
+                    )
+        
+        return connections
+    
+    def _add_connection(self, connections: List, processed_pairs: set, 
+                      node1_id: str, node2_id: str, strength: float,
+                      nodes_data: Dict[str, Any]) -> None:
+        """Add a connection if valid and not already processed."""
+        # Skip if either node doesn't exist
+        if node2_id not in nodes_data:
+            return
+            
+        # Create canonical connection ID (ordered node IDs)
+        conn_pair = tuple(sorted([node1_id, node2_id]))
+        
+        # Skip if already processed
+        if conn_pair in processed_pairs:
+            return
+            
+        # Add connection
+        connections.append({
+            "source": node1_id,
+            "target": node2_id,
+            "strength": strength
+        })
+        processed_pairs.add(conn_pair)
+
+
+def patch_visualization(system):
+    """
+    Patch a system instance with visualization capabilities.
+    
+    Args:
+        system: The system instance to patch
+        
+    Returns:
+        The patched system
+    """
+    # Check if already has visualization method
+    if hasattr(system, 'get_visualization_data') and callable(system.get_visualization_data):
+        logger.info("System already has visualization capabilities")
+        return system
+    
+    # Create adapter
+    adapter = QuantumVisualizationAdapter(system)
+    
+    # Add method to system
+    system.get_visualization_data = adapter.get_visualization_data
+    
+    logger.info(f"Successfully patched {type(system).__name__} with visualization capabilities")
+    return system
+
+
+# Helper functions for finding and loading modules
+def find_system_instance(module):
+    """Find a system instance within a module."""
+    for name in dir(module):
+        obj = getattr(module, name)
+        # Look for likely system instances
+        if hasattr(obj, '__class__'):
+            class_name = obj.__class__.__name__
+            if any(term in class_name for term in ('System', 'Kaleidoscope', 'Engine', 'Manager')):
+                return obj
+    return None
+
+def load_module_from_file(file_path):
+    """Load a Python module from a file path."""
+    try:
+        module_name = os.path.basename(file_path).replace('.py', '')
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception as e:
+        logger.error(f"Error loading module from {file_path}: {e}")
+        return None
+
+# Main usage example
+if __name__ == "__main__":
+    print("This module should be imported by the Quantum Kaleidoscope system.")
+    print("You can use it directly by importing and calling patch_visualization():")
+    print("  from visualization-integration import patch_visualization")
+    print("  patch_visualization(your_system)")
+"""
+        
+        # Write to file
+        with open(integration_file, 'w') as f:
+            f.write(adapter_code)
+        
+        # Make executable
+        os.chmod(integration_file, 0o755)
+        
+        logger.info(f"Created visualization adapter at {integration_file}")
+        return True
+    
+    def patch_launcher_script(self) -> bool:
+        """Patch the launcher script to use the visualization adapter."""
+        launcher_file = self.files["launcher"]
+        
+        if not os.path.exists(launcher_file):
+            logger.error(f"Launcher script not found at {launcher_file}")
+            return False
+            
+        # Create backup
+        self.create_backup(launcher_file)
+        
+        # Read the script
+        with open(launcher_file, 'r') as f:
+            content = f.read()
+        
+        # Check if already patched
+        if "from visualization-integration import patch_visualization" in content:
+            logger.info("Launcher script already patched")
+            return True
+        
+        # Find import section to add our import
+        import_idx = content.find("import ")
+        if import_idx == -1:
+            logger.error("Could not find import section in launcher script")
+            return False
+        
+        # Add import after last import line
+        lines = content.split('\n')
+        last_import_idx = 0
+        for i, line in enumerate(lines):
+            if line.startswith("import ") or line.startswith("from "):
+                last_import_idx = i
+        
+        # Add our import
+        import_line = 'from visualization-integration import patch_visualization'
+        lines.insert(last_import_idx + 1, import_line)
+        
+        # Find the launch_system function to patch
+        launch_idx = content.find("def launch_system(")
+        if launch_idx == -1:
+            logger.error("Could not find launch_system function in launcher script")
+            return False
+        
+        # Find return statement to add patch before it
+        for i, line in enumerate(lines):
+            if "return process_mgr" in line:
+                indent = ' ' * (len(line) - len(line.lstrip()))
+                patch_line = f"{indent}# Apply visualization patch\n{indent}patch_visualization(process_mgr)"
+                lines[i] = f"{patch_line}\n{line}"
+                break
+        
+        # Write modified content back
+        with open(launcher_file, 'w') as f:
+            f.write('\n'.join(lines))
+        
+        logger.info("Successfully patched launcher script to use visualization adapter")
+        return True
+    
+    def fix_system(self) -> bool:
+        """Apply all fixes to the system."""
+        # Analyze installation
+        analysis = self.analyze_installation()
+        
+        # Print analysis results
+        print("\n=== Quantum Kaleidoscope System Analysis ===")
+        print(f"Status: {analysis['status']}")
+        
+        if analysis["missing_files"]:
+            print("\nMissing Files:")
+            for file in analysis["missing_files"]:
+                print(f"  - {file}: {self.files[file]}")
+        
+        if analysis["issues"]:
+            print("\nIdentified Issues:")
+            for issue in analysis["issues"]:
+                print(f"  - {issue}")
+        
+        if analysis["recommendations"]:
+            print("\nRecommendations:")
+            for rec in analysis["recommendations"]:
+                print(f"  - {rec}")
+        
+        print("\n=== Applying Fixes ===")
+        
+        # Fix deployment script
+        if "Deployment script missing directory creation" in ' '.join(analysis["issues"]):
+            print("Fixing deployment script...")
+            if self.fix_deployment_script():
+                print("✓ Deployment script fixed")
+            else:
+                print("✗ Failed to fix deployment script")
+                return False
+        
+        # Create visualization adapter
+        print("Creating visualization adapter...")
+        if self.create_visualization_adapter():
+            print("✓ Visualization adapter created")
+        else:
+            print("✗ Failed to create visualization adapter")
+            return False
+        
+        # Patch launcher script
+        if "Launcher script missing proper visualization integration" in ' '.join(analysis["issues"]):
+            print("Patching launcher script...")
+            if self.patch_launcher_script():
+                print("✓ Launcher script patched")
+            else:
+                print("✗ Failed to patch launcher script")
+                return False
+        
+        print("\n=== All fixes applied successfully ===")
+        return True
+    
+    def run_system(self, main_port=8000, visualizer_port=8080, auto_gen=False):
+        """Run the Quantum Kaleidoscope system."""
+        launcher_file = self.files["launcher"]
+        
+        if not os.path.exists(launcher_file):
+            logger.error(f"Launcher script not found at {launcher_file}")
+            return False
+        
+        # Construct command
+        cmd = [
+            sys.executable,
+            launcher_file,
+            "--data-dir", self.data_dir,
+            "--main-port", str(main_port),
+            "--visualizer-port", str(visualizer_port)
+        ]
+        
+        if auto_gen:
+            cmd.append("--auto-gen")
+        
+        # Run the command
+        print(f"\nStarting Quantum Kaleidoscope with command:\n  {' '.join(cmd)}")
+        
+        try:
+            subprocess.run(cmd)
+            return True
+        except Exception as e:
+            logger.error(f"Error running system: {e}")
+            return False
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="Quantum Kaleidoscope Integrator")
+    parser.add_argument("--base-dir", type=str, default=".", help="Base directory for Quantum Kaleidoscope")
+    parser.add_argument("--data-dir", type=str, default="./data", help="Data directory")
+    parser.add_argument("--main-port", type=int, default=8000, help="Main system port")
+    parser.add_argument("--vis-port", type=int, default=8080, help="Visualization port")
+    parser.add_argument("--auto-gen", action="store_true", help="Enable auto-generation")
+    parser.add_argument("--fix-only", action="store_true", help="Only fix system, don't run")
+    parser.add_argument("--run-only", action="store_true", help="Only run system, don't fix")
+    
+    args = parser.parse_args()
+    
+    integrator = QuantumKaleidoscopeIntegrator(args.base_dir, args.data_dir)
+    
+    if not args.run_only:
+        # Apply fixes
+        if not integrator.fix_system():
+            print("Failed to fix system, cannot proceed")
+            return 1
+    
+    if not args.fix_only:
+        # Run the system
+        integrator.run_system(
+            main_port=args.main_port,
+            visualizer_port=args.vis_port,
+            auto_gen=args.auto_gen
+        )
+    
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
